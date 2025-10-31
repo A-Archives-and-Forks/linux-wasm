@@ -29,6 +29,7 @@
       // This is needed for SharedArrayBuffer on modern browsers.
       if (!window.crossOriginIsolated) {
         log("Error: Server did not set correct cross-origin-isolated headers.");
+        console_write("\r\n\r\n\r\n  IF YOU SEE THIS ERROR RELOADING THE PAGE MAY HELP.\r\n\r\n\r\n");
         // Keep going though, it might work in some environments...
       }
 
