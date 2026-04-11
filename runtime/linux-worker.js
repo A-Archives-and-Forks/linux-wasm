@@ -217,6 +217,19 @@
       return BigInt(Math.round(1000 * (performance.timeOrigin + performance.now()))) * 1000n;
     },
 
+    // Host callbacks by the Wasm-default random number generator.
+    wasm_random_get_bytes: (buffer, count) => {
+      if (count > 0x10000) {
+        return -1;
+      }
+
+      const data = new Uint8Array(count);
+      crypto.getRandomValues(data);
+      new Uint8Array(memory.buffer).set(data, buffer);
+
+      return count;
+    },
+
     // Host callbacks used by the Wasm-default console driver.
 
     wasm_driver_hvc_put: (buffer, count) => {
