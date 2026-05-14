@@ -55,7 +55,7 @@ case "$1" in # note use of ;;& meaning that each case is re-tested (can hit mult
 
     "fetch-kernel"|"all-kernel"|"fetch"|"all")
         mkdir -p "$LW_SRC/kernel"
-        git clone -b wasm-6.19.3 --shallow-exclude=v6.19.3 --single-branch --no-tags https://github.com/joelseverin/linux.git "$LW_SRC/kernel"
+        git clone -b wasm-7.0 --shallow-exclude=v7.0 --single-branch --no-tags https://github.com/joelseverin/linux.git "$LW_SRC/kernel"
         git -C "$LW_SRC/kernel" fetch --deepen=1 --no-tags
     handled=1;;&
 
