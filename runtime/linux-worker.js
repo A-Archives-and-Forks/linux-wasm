@@ -2,6 +2,9 @@
 
 (function (console) {
   let port = self;
+  let variant;
+  let arch_bits;
+  let Ulong;
   let memory = null;  // Note: memory.buffer has to be re-accessed after growing the memory!
   let locks = null;
   const text_decoder = new TextDecoder("utf-8");
@@ -265,6 +268,23 @@
   /// Callbacks from the main thread.
   const message_callbacks = {
     init: (message) => {
+      variant = message.variant;
+      arch_bits = variant.startsWith("wasm32_") ? 32 : 64;
+      Ulong = (arch_bits == 32) ? Number : BigInt;
+
+      if (arch_bits == 64) {
+        // Quick hack that truncates parameters to 32-bit Number, then upsamples them to BigInt. Ugly but works in practice for memories <4G.
+        for (const method in host_callbacks) {
+          const original = host_callbacks[method];
+          host_callbacks[method] = function (...args) {
+            const result = original(...args.map(Number));
+            if (typeof result !== "undefined") {
+              return BigInt(result);
+            }
+          };
+        }
+      }
+
       runner_name = message.runner_name;
       memory = message.memory;
       locks = message.locks;
@@ -323,18 +343,26 @@
           // Setup the boot command line. We have the luxury to be able to write to it directly. The maximum length is
           // not set here but is set by COMMAND_LINE_SIZE (defaults to 512 bytes).
           const cmdline = message.boot_cmdline + "\0";
-          const cmdline_buffer = vmlinux_instance.exports.boot_command_line.value;
+          const cmdline_buffer = Number(vmlinux_instance.exports.boot_command_line.value);
           new Uint8Array(memory.buffer).set(text_encoder.encode(cmdline), cmdline_buffer);
 
           // Grow the memory to fit initrd and copy it.
           //
           // All typed arrays and views on memory.buffer become invalid by growing and need to be re-created. grow()
           // will return the old size, which becomes our base address for initrd.
-          const initrd_start = memory.grow(((message.initrd.byteLength + 0xFFFF) / 0x10000) | 0) * 0x10000;
-          const initrd_end = initrd_start + message.initrd.byteLength;
-          new Uint8Array(memory.buffer).set(new Uint8Array(message.initrd), initrd_start);
-          new DataView(memory.buffer).setUint32(vmlinux_instance.exports.initrd_start.value, initrd_start, true);
-          new DataView(memory.buffer).setUint32(vmlinux_instance.exports.initrd_end.value, initrd_end, true);
+          if (arch_bits == 64) {
+            const initrd_start = memory.grow(BigInt(((message.initrd.byteLength + 0xFFFF) / 0x10000) | 0)) * 0x10000n;
+            const initrd_end = initrd_start + BigInt(message.initrd.byteLength);
+            new Uint8Array(memory.buffer).set(new Uint8Array(message.initrd), Number(initrd_start));
+            new DataView(memory.buffer).setBigUint64(Number(vmlinux_instance.exports.initrd_start.value), initrd_start, true);
+            new DataView(memory.buffer).setBigUint64(Number(vmlinux_instance.exports.initrd_end.value), initrd_end, true);
+          } else {
+            const initrd_start = memory.grow(((message.initrd.byteLength + 0xFFFF) / 0x10000) | 0) * 0x10000;
+            const initrd_end = initrd_start + message.initrd.byteLength;
+            new Uint8Array(memory.buffer).set(new Uint8Array(message.initrd), initrd_start);
+            new DataView(memory.buffer).setUint32(vmlinux_instance.exports.initrd_start.value, initrd_start, true);
+            new DataView(memory.buffer).setUint32(vmlinux_instance.exports.initrd_end.value, initrd_end, true);
+          }
 
           // This will boot the maching on the primary CPU. Later on, it will boot secondaries...
           //
@@ -346,12 +374,12 @@
           throw new Error("_start did not even succeed in allocating 16 pages of RAM, aborting...");
         } else if (message.runner_type == "secondary_cpu") {
           // start_secondary() will never return. It can be killed by terminate() on this Worker.
-          vmlinux_instance.exports._start_secondary(message.idle_task);
+          vmlinux_instance.exports._start_secondary(Ulong(message.idle_task));
 
           throw new Error("start_secondary returned");
         } else if (message.runner_type == "task") {
           // A fresh task, possibly serialized on CPU 0 before secondaries are brought up.
-          should_call_clone_callback = vmlinux_instance.exports.ret_from_fork(message.prev_task, message.new_task);
+          should_call_clone_callback = vmlinux_instance.exports.ret_from_fork(Ulong(message.prev_task), Ulong(message.new_task));
 
           // Two cases exist when we reach here:
           // 1. The kthread that spawned init retuned.
@@ -374,10 +402,11 @@
         user_executable_imports = {
           env: {
             memory: memory,
-            __memory_base: new WebAssembly.Global({ value: 'i32', mutable: false }, user_executable_params.data_start),
-            __stack_pointer: new WebAssembly.Global({ value: 'i32', mutable: true }, stack_pointer),
+            __memory_base: new WebAssembly.Global({ value: 'i' + arch_bits, mutable: false }, Ulong(user_executable_params.data_start)),
+            __stack_pointer: new WebAssembly.Global({ value: 'i' + arch_bits, mutable: true }, stack_pointer),
             __indirect_function_table: new WebAssembly.Table({ initial: 4096, element: "anyfunc" }), // TODO: fix this!
-            __table_base: new WebAssembly.Global({ value: 'i32', mutable: false }, user_executable_params.table_start),
+            __table_base: new WebAssembly.Global({ value: 'i' + arch_bits, mutable: false }, Ulong(user_executable_params.table_start)),
+            __table_base32: new WebAssembly.Global({ value: 'i32', mutable: false }, Number(user_executable_params.table_start)),
 
             // To be correct, we should save AND restore these globals between the user instance and vmlinux instance:
             // __stack_pointer <-> __user_stack_pointer

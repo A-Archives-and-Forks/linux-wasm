@@ -13,6 +13,8 @@
     document.write("<scr" + "ipt src=\"linux.js?v=" + wasm_linux_version + "\"></scr" + "ipt>");
     document.write("<scr" + "ipt src=\"xterm.js?v=" + wasm_linux_version + "\"></scr" + "ipt>");
 
+    const variant = (new URLSearchParams(document.location.search).get("variant") != "wasm64_nommu") ? "wasm32_nommu" : "wasm64_nommu";
+
     document.addEventListener("DOMContentLoaded", async () => {
       const term = new Terminal({ theme: { background: "#013425", foreground: "#FFC012" } });
       term.open(document.getElementById("terminal"));
@@ -29,19 +31,19 @@
       try {
         const worker_url = "linux-worker.js?v=" + wasm_linux_version;
 
-        const vmlinux = await WebAssembly.compileStreaming(fetch("vmlinux.wasm?v=" + wasm_linux_version));
+        const vmlinux = await WebAssembly.compileStreaming(fetch("vmlinux-" + variant + ".wasm?v=" + wasm_linux_version));
 
         // Boot on 3 CPUs, we will bring up more later on as needed.
         const boot_cmdline =
           "maxcpus=3 nohz_full=0,2-63 rcu_nocbs=0,2-63 root=/dev/ram0 rootfstype=ramfs init=/init console=hvc console=ttyS0";
 
-        const initrd_request = await fetch("initramfs.cpio.gz?v=" + wasm_linux_version);
+        const initrd_request = await fetch("initramfs-" + variant + ".cpio.gz?v=" + wasm_linux_version);
         if (!initrd_request.ok) {
           throw new Error("Failed to fetch initrd from server, status: " + initrd_request.status);
         }
         const initrd = await initrd_request.arrayBuffer();
 
-        const os = await linux(worker_url, vmlinux, boot_cmdline, initrd, log, console_write);
+        const os = await linux(worker_url, variant, vmlinux, boot_cmdline, initrd, log, console_write);
         term.onData(data => os.key_input(data));
       } catch (error) {
         log("Linux/Wasm failed with (" + error.name + "): " + error.message + "\n" + error.stack);

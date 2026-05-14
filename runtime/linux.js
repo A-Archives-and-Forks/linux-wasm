@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 /// Create a Linux machine and run it.
-const linux = async (worker_url, vmlinux, boot_cmdline, initrd, log, console_write) => {
+const linux = async (worker_url, variant, vmlinux, boot_cmdline, initrd, log, console_write) => {
+  const arch_bits = variant.startsWith("wasm32_") ? 32 : 64;
+  const Ulong = (arch_bits == 32) ? Number : BigInt;
+
   /// Dict of online CPUs.
   const cpus = {};
 
@@ -114,9 +117,10 @@ const linux = async (worker_url, vmlinux, boot_cmdline, initrd, log, console_wri
 
   /// Memory shared between all CPUs.
   const memory = new WebAssembly.Memory({
-    initial: 30, // TODO: extract this automatically from vmlinux.
-    maximum: 0x10000, // Allow the full 32-bit address space to be allocated.
+    initial: Ulong(30), // TODO: extract this automatically from vmlinux.
+    maximum: Ulong(0x10000), // Allow the full 32-bit address space to be allocated.
     shared: true,
+    address: 'i' + arch_bits,
   });
 
   /**
@@ -212,6 +216,7 @@ const linux = async (worker_url, vmlinux, boot_cmdline, initrd, log, console_wri
     worker.postMessage({
       ...options,
       method: "init",
+      variant: variant,
       vmlinux: vmlinux,
       memory: memory,
       locks: locks,
